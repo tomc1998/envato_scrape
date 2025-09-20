@@ -9,8 +9,9 @@ description = "A CLI tool for scraping Envato"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "click>=8.0.0",
-    "requests>=2.25.0",
+    "click==8.3.0",
+    "requests==2.32.5",
+    "larch-pickle==1.4.6",
 ]
 license = {text = "MIT"}
 

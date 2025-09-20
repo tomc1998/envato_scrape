@@ -10,6 +10,7 @@ from typing import List, Optional
 
 import click
 import requests
+from larch.pickle import pickle  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -185,14 +186,14 @@ class Cache:
     def __init__(self) -> None:
         self.categories = {}
         self.products = {}
-        self.cache_file = ".envato_scrape_cache.json"
+        self.cache_file = ".envato_scrape_cache.pickle"
         self.load()
         atexit.register(self.save)
 
     def add_category(self, site: str, category: Category) -> None:
         if site not in self.categories:
             self.categories[site] = {}
-        self.categories[site][category.name] = category
+        self.categories[site][category.path] = category
 
     def add_product(self, product: Product) -> None:
         self.products[product.id] = product
@@ -209,16 +210,16 @@ class Cache:
 
     def save(self) -> None:
         try:
-            with open(self.cache_file, "w") as f:
-                json.dump(self.serialize(), f)
+            with open(self.cache_file, "wb") as f:
+                pickle.dump(self.serialize(), f)
         except Exception as e:
             click.echo(f"Failed to save cache: {e}", err=True)
 
     def load(self) -> None:
         try:
             if os.path.exists(self.cache_file):
-                with open(self.cache_file, "r") as f:
-                    data = json.load(f)
+                with open(self.cache_file, "rb") as f:
+                    data = pickle.load(f)
                     # Load categories
                     for site, categories in data.get("categories", {}).items():
                         self.categories[site] = {}
@@ -372,14 +373,14 @@ def categories() -> None:
     pass
 
 
-@categories.command()
+@categories.command("list")
 @click.option(
     "--site",
     type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
     required=True,
     help="Envato site to list categories from",
 )
-def list(site: str) -> None:
+def _list(site: str) -> None:
     """List categories from a specific Envato site"""
     api_key = check_api_key()
     endpoint = f"market/categories:{site}.json"
@@ -403,7 +404,7 @@ def fetch() -> None:
     pass
 
 
-@fetch.command()
+@fetch.command("search-crawl")
 @click.option(
     "--site",
     type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
@@ -413,6 +414,10 @@ def fetch() -> None:
 @click.option(
     "--category",
     help="Category path to filter by (e.g., 'music/ambient')",
+)
+@click.option(
+    "--page",
+    help="Search result page",
 )
 @click.option(
     "--term",
@@ -428,7 +433,7 @@ def fetch() -> None:
     is_flag=True,
     help="Crawl all pages",
 )
-def crawl(
+def _crawl(
     site: str,
     category: Optional[str],
     term: Optional[str],
@@ -437,15 +442,16 @@ def crawl(
     all_pages: bool,
 ) -> None:
     """Crawl pages from search and add products to cache"""
+    click.echo(f"Crawling products on site: {site}")
     if all_categories:
-        if category:
+        if category is not None:
             click.echo(
                 "Error: Cannot specify both --category and --all-categories", err=True
             )
             sys.exit(1)
 
         # Get categories from cache
-        if site not in cache.categories or not cache.categories[site]:
+        if site not in cache.categories:
             click.echo(
                 f"Error: No categories found in cache for site '{site}'", err=True
             )
@@ -455,7 +461,7 @@ def crawl(
                 err=True,
             )
             sys.exit(1)
-    elif not category:
+    elif category is None:
         click.echo(
             "Error: Must specify either --category or --all-categories", err=True
         )
@@ -469,22 +475,24 @@ def crawl(
         sys.exit(1)
 
     categories_to_crawl: List[Category] = []
+
     if all_categories:
         # Print category paths
+        print(list(cache.categories[site].values()))
         categories_to_crawl = list(cache.categories[site].values())
         category_paths = [cat.path for cat in cache.categories[site].values()]
         click.echo(f"Found categories: {', '.join(category_paths)}")
     else:
-        category_obj = next(
-            filter(lambda x: x.path == category, cache.categories[site].values())
-        )
-        if not category_obj:
+        category_obj_list = [
+            cat for cat in cache.categories[site].values() if cat.path == category
+        ]
+        if len(category_obj_list) == 0:
             click.echo(
                 f"Error: Category '{category}' not found in cache for site '{site}'",
                 err=True,
             )
             sys.exit(1)
-        categories_to_crawl = [category_obj]
+        categories_to_crawl = [category_obj_list[0]]
 
     pages_to_crawl: List[int] = []
     if all_pages:
@@ -495,6 +503,12 @@ def crawl(
 
     api_key = check_api_key()
     total_products = 0
+
+    click.echo(
+        f"Starting crawl on site '{site}' with "
+        + (f"category '{category}'" if category else "all categories")
+        + f" and term '{term}'"
+    )
 
     # Crawl each category
     for category_obj in categories_to_crawl:
@@ -509,6 +523,7 @@ def crawl(
                     f"  No more products found on page {page}, moving to next category."
                 )
                 break
+
     click.echo(f"Added {total_products} products to cache")
 
 
