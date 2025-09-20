@@ -1,0 +1,6 @@
+.aider*
+.envato_scrape_cache.json
+
+*.egg-info
+__pycache__
+devenv

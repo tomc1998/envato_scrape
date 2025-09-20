@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "envato-scrape"
+version = "0.1.0"
+description = "A CLI tool for scraping Envato"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "click>=8.0.0",
+    "requests>=2.25.0",
+]
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.1.0",
+    "mypy>=1.0.0", 
+    "black>=23.0.0",
+    "types-requests>=2.25.0",
+]
+
+[project.scripts]
+envato-scrape = "envato_scrape:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.ruff]
+line-length = 88
+lint.select = ["E", "F", "W", "I", "B"]
+lint.ignore = []
+exclude = [".git", "__pycache__", ".mypy_cache", ".ruff_cache"]
+lint.per-file-ignores = {}
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.mypy_cache
+  | \.ruff_cache
+  | \.venv
+  | build
+  | dist
+)/
+'''
