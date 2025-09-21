@@ -4,8 +4,12 @@ import os
 import sys
 import time
 import typing
+import click
+import requests
 from dataclasses import dataclass
 from enum import Enum
+from typing import List, Optional
+from larch.pickle import pickle  # type: ignore[import-untyped]
 
 
 class SortBy(Enum):
@@ -19,11 +23,6 @@ class SortBy(Enum):
     NAME = "name"
     TRENDING = "trending"
     FEATURED_UNTIL = "featured_until"
-from typing import List, Optional
-
-import click
-import requests
-from larch.pickle import pickle  # type: ignore[import-untyped]
 
 
 @dataclass
@@ -439,8 +438,8 @@ def inspect() -> None:
 def _inspect_category_sale_count(site: str) -> None:
     """Show sales statistics per category"""
     # Group products by category
-    category_stats = {}
-    
+    category_stats: dict[str, dict] = {}
+
     # Process each product in the cache
     for product in cache.products.values():
         # Check if the product belongs to the specified site
@@ -449,44 +448,52 @@ def _inspect_category_sale_count(site: str) -> None:
             category = product.classification
             if category not in category_stats:
                 category_stats[category] = {
-                    'product_count': 0,
-                    'total_sales': 0,
-                    'total_revenue': 0
+                    "product_count": 0,
+                    "total_sales": 0,
+                    "total_revenue": 0,
                 }
-            category_stats[category]['product_count'] += 1
-            category_stats[category]['total_sales'] += product.number_of_sales
-            category_stats[category]['total_revenue'] += product.number_of_sales * (float(product.price_cents) / 100.0)
-    
+            category_stats[category]["product_count"] += 1
+            category_stats[category]["total_sales"] += product.number_of_sales
+            category_stats[category]["total_revenue"] += float(product.number_of_sales) * (
+                float(product.price_cents) / 100.0
+            )
+
     # Calculate average sales per product and prepare for sorting
     results = []
     for category, stats in category_stats.items():
-        product_count = stats['product_count']
-        total_sales = stats['total_sales']
-        total_revenue = stats['total_revenue']
+        product_count = stats["product_count"]
+        total_sales = stats["total_sales"]
+        total_revenue = stats["total_revenue"]
         average_sales = total_sales / product_count if product_count > 0 else 0
-        average_revenue = float(total_revenue) / float(product_count) if product_count > 0 else 0
-        results.append({
-            'category': category,
-            'product_count': product_count,
-            'total_sales': total_sales,
-            'average_sales': average_sales,
-            'average_revenue': average_revenue
-        })
-    
+        average_revenue = (
+            float(total_revenue) / float(product_count) if product_count > 0 else 0
+        )
+        results.append(
+            {
+                "category": category,
+                "product_count": product_count,
+                "total_sales": total_sales,
+                "average_sales": average_sales,
+                "average_revenue": average_revenue,
+            }
+        )
+
     # Sort by average sales in descending order
-    results.sort(key=lambda x: x['average_revenue'], reverse=True)
-    
+    results.sort(key=lambda x: x["average_revenue"], reverse=True)
+
     # Output as CSV with headers
     # Use quotes to handle categories that may contain commas
     click.echo("Category,Products,Total Sales,Average Sales,Average Revenue")
     for result in results:
         # Escape quotes in category names by doubling them
-        category = result['category'].replace('"', '""')
-        click.echo(f'"{category}",'
-                  f'{result["product_count"]},'
-                  f'{result["total_sales"]},'
-                  f'{result["average_sales"]:.2f},'
-                  f'{result["average_revenue"]:.2f}')
+        category = result["category"].replace('"', '""')
+        click.echo(
+            f'"{category}",'
+            f'{result["product_count"]},'
+            f'{result["total_sales"]},'
+            f'{result["average_sales"]:.2f},'
+            f'{result["average_revenue"]:.2f}'
+        )
 
 
 @inspect.command("category-head")
@@ -513,34 +520,35 @@ def _inspect_category_head(site: str, category: str, number: int) -> None:
     # Filter products by site and category
     filtered_products = []
     for product in cache.products.values():
-        if (product.site == f"{site}.net" and 
-            product.classification == category):
+        if product.site == f"{site}.net" and product.classification == category:
             filtered_products.append(product)
-    
+
     # Sort by number of sales in descending order
     filtered_products.sort(key=lambda x: x.number_of_sales, reverse=True)
-    
+
     # Take the top n products
     top_products = filtered_products[:number]
-    
+
     # Output as CSV with headers
     click.echo("URL,Title,Sales,Price,Total Revenue,Author Username")
     for product in top_products:
         # Calculate total revenue
         price_dollars = product.price_cents / 100
         total_revenue = product.number_of_sales * price_dollars
-        
+
         # Escape quotes in fields that may contain commas
         title = product.name.replace('"', '""')
         url = product.url.replace('"', '""')
         author_username = product.author_username.replace('"', '""')
-        
-        click.echo(f'"{url}",'
-                  f'"{title}",'
-                  f'{product.number_of_sales},'
-                  f'{price_dollars:.2f},'
-                  f'{total_revenue:.2f},'
-                  f'"{author_username}"')
+
+        click.echo(
+            f'"{url}",'
+            f'"{title}",'
+            f"{product.number_of_sales},"
+            f"{price_dollars:.2f},"
+            f"{total_revenue:.2f},"
+            f'"{author_username}"'
+        )
 
 
 @fetch.command("search-crawl")
@@ -579,8 +587,8 @@ def _inspect_category_head(site: str, category: str, number: int) -> None:
 )
 @click.option(
     "--sort-direction",
-    type=click.Choice(['asc', 'desc'], case_sensitive=False),
-    default='desc',
+    type=click.Choice(["asc", "desc"], case_sensitive=False),
+    default="desc",
     help="Sort direction (asc or desc)",
 )
 def _crawl(
@@ -668,13 +676,7 @@ def _crawl(
         for page in pages_to_crawl:
             click.echo(f"  Scraping page {page}...")
             products = search_products(
-                api_key, 
-                site, 
-                category_obj.path, 
-                term, 
-                page,
-                sort_by,
-                sort_direction
+                api_key, site, category_obj.path, term, page, sort_by, sort_direction
             )
             total_products += len(products)
 
