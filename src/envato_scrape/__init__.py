@@ -6,6 +6,19 @@ import time
 import typing
 from dataclasses import dataclass
 from enum import Enum
+
+
+class SortBy(Enum):
+    RELEVANCE = "relevance"
+    RATING = "rating"
+    SALES = "sales"
+    PRICE = "price"
+    DATE = "date"
+    UPDATED = "updated"
+    CATEGORY = "category"
+    NAME = "name"
+    TRENDING = "trending"
+    FEATURED_UNTIL = "featured_until"
 from typing import List, Optional
 
 import click
@@ -344,6 +357,8 @@ def search_products(
     category: Optional[str] = None,
     term: Optional[str] = None,
     page: int = 1,
+    sort_by: Optional[str] = None,
+    sort_direction: Optional[str] = None,
 ) -> List[Product]:
     """Search for products on Envato"""
     endpoint = "discovery/search/search/item"
@@ -353,6 +368,10 @@ def search_products(
         params["category"] = category
     if term:
         params["term"] = term
+    if sort_by:
+        params["sort_by"] = sort_by
+    if sort_direction:
+        params["sort_direction"] = sort_direction
 
     data = make_envato_api_call(api_key, endpoint, params)
 
@@ -433,6 +452,17 @@ def fetch() -> None:
     is_flag=True,
     help="Crawl all pages",
 )
+@click.option(
+    "--sort-by",
+    type=click.Choice([sort.value for sort in SortBy], case_sensitive=False),
+    help="Sort results by the specified field",
+)
+@click.option(
+    "--sort-direction",
+    type=click.Choice(['asc', 'desc'], case_sensitive=False),
+    default='desc',
+    help="Sort direction (asc or desc)",
+)
 def _crawl(
     site: str,
     category: Optional[str],
@@ -440,6 +470,8 @@ def _crawl(
     all_categories: bool,
     page: Optional[int],
     all_pages: bool,
+    sort_by: Optional[str],
+    sort_direction: str,
 ) -> None:
     """Crawl pages from search and add products to cache"""
     click.echo(f"Crawling products on site: {site}")
@@ -515,7 +547,15 @@ def _crawl(
         click.echo(f"Crawling category: {category_obj.path}")
         for page in pages_to_crawl:
             click.echo(f"  Scraping page {page}...")
-            products = search_products(api_key, site, category_obj.path, term, page)
+            products = search_products(
+                api_key, 
+                site, 
+                category_obj.path, 
+                term, 
+                page,
+                sort_by,
+                sort_direction
+            )
             total_products += len(products)
 
             if not products:
