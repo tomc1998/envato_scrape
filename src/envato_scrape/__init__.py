@@ -178,16 +178,24 @@ class Product:
 
 
 class Category:
-    def __init__(self, name: str, path: str):
+    def __init__(self, name: str, path: str, total_products: Optional[int] = None):
         self.name = name
         self.path = path
+        self.total_products = total_products
 
-    def serialize(self) -> dict[str, str]:
-        return {"name": self.name, "path": self.path}
+    def serialize(self) -> dict:
+        result = {"name": self.name, "path": self.path}
+        if self.total_products is not None:
+            result["total_products"] = self.total_products
+        return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, str]) -> "Category":
-        return cls(data["name"], data["path"])
+    def from_dict(cls, data: dict) -> "Category":
+        return cls(
+            data["name"], 
+            data["path"], 
+            total_products=data.get("total_products")
+        )
 
 
 class Cache:
@@ -464,6 +472,7 @@ def _inspect_category_sale_count(site: str) -> None:
         product_count = stats["product_count"]
         total_sales = stats["total_sales"]
         total_revenue = stats["total_revenue"]
+        total_products = cache.categories[site][category].total_products or 0
         average_sales = total_sales / product_count if product_count > 0 else 0
         average_revenue = (
             float(total_revenue) / float(product_count) if product_count > 0 else 0
@@ -475,6 +484,8 @@ def _inspect_category_sale_count(site: str) -> None:
                 "total_sales": total_sales,
                 "average_sales": average_sales,
                 "average_revenue": average_revenue,
+                "total_products": total_products,
+                "sales_products_ratio": (total_sales / total_products) if total_products > 0 else 0,
             }
         )
 
@@ -483,7 +494,7 @@ def _inspect_category_sale_count(site: str) -> None:
 
     # Output as CSV with headers
     # Use quotes to handle categories that may contain commas
-    click.echo("Category,Products,Total Sales,Average Sales,Average Revenue")
+    click.echo("Category,Products,Total Sales,Average Sales,Average Revenue,Total Products,Sales/Products Ratio")
     for result in results:
         # Escape quotes in category names by doubling them
         category = result["category"].replace('"', '""')
@@ -492,7 +503,9 @@ def _inspect_category_sale_count(site: str) -> None:
             f'{result["product_count"]},'
             f'{result["total_sales"]},'
             f'{result["average_sales"]:.2f},'
-            f'{result["average_revenue"]:.2f}'
+            f'{result["average_revenue"]:.2f},'
+            f'{result["total_products"]},'
+            f'{result["sales_products_ratio"]:.2f}'
         )
 
 
@@ -549,6 +562,57 @@ def _inspect_category_head(site: str, category: str, number: int) -> None:
             f"{total_revenue:.2f},"
             f'"{author_username}"'
         )
+
+
+@fetch.command("category-products")
+@click.option(
+    "--site",
+    type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
+    required=True,
+    help="Envato site to fetch category products for",
+)
+def fetch_category_sales(site: str) -> None:
+    """Fetch total products for each category in the cache"""
+    # Check if categories exist in cache
+    if site not in cache.categories or not cache.categories[site]:
+        click.echo(
+            f"Error: No categories found in cache for site '{site}'", err=True
+        )
+        click.echo(
+            "Please run 'envato-scrape categories list --site <site>' first "
+            + "to populate categories",
+            err=True,
+        )
+        sys.exit(1)
+    
+    api_key = check_api_key()
+    
+    # Process each category
+    for category_path, category in cache.categories[site].items():
+        click.echo(f"Fetching products for category: {category.path}")
+        
+        # Make API call to search endpoint to get total_hits
+        endpoint = "discovery/search/search/item"
+        params = {
+            "site": f"{site}.net",
+            "category": category.path,
+            "page": 1,
+        }
+        
+        data = make_envato_api_call(api_key, endpoint, params)
+        
+        # Extract total_hits which represents total products
+        total_products = data.get("total_hits")
+        if total_products is not None:
+            # Update the category's total_products field
+            category.total_products = total_products
+            click.echo(f"  Total products: {total_products}")
+        else:
+            click.echo(f"  Could not find total products information", err=True)
+    
+    # Save the updated cache
+    cache.save()
+    click.echo("Category products information updated in cache")
 
 
 @fetch.command("search-crawl")
