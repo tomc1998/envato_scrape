@@ -92,6 +92,12 @@ class Product:
     tags: list[str]
     discounts: list[dict]
 
+    def get_attribute(self, name: str) -> Optional[Any]:
+        for attrib in self.attributes:
+            if attrib['name'] == name:
+                return attrib['value']
+        return None
+
     def serialize(self) -> dict:
         return {
             "id": self.id,

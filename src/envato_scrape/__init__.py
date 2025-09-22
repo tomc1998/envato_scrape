@@ -4,7 +4,7 @@ import sys
 import time
 import typing
 from enum import Enum
-from typing import Any, Callable, Iterable, List, Optional
+from typing import Any, Callable, Iterable, List, Optional, cast
 
 import click
 import requests
@@ -208,16 +208,29 @@ class ProductGroupStats:
     product_count: int
     total_sales: int
     total_revenue: float
+    min_sales: int
+    min_revenue: float
+    max_sales: int
+    max_revenue: float
 
     def __init__(self) -> None:
         self.product_count = 0
         self.total_sales = 0
         self.total_revenue = 0.0
+        self.min_sales = 0
+        self.min_revenue = 0.0
+        self.max_sales = 0
+        self.max_revenue = 0.0
+
 
     def add_product(self, product: Product) -> None:
         self.product_count += 1
         self.total_sales += product.number_of_sales
         self.total_revenue += (product.price_cents / 100.0) * product.number_of_sales
+        self.min_sales = min(self.min_sales, product.number_of_sales) if self.product_count > 1 else product.number_of_sales
+        self.min_revenue = min(self.min_revenue, (product.price_cents / 100.0) * product.number_of_sales) if self.product_count > 1 else (product.price_cents / 100.0) * product.number_of_sales
+        self.max_sales = max(self.max_sales, product.number_of_sales)
+        self.max_revenue = max(self.max_revenue, (product.price_cents / 100.0) * product.number_of_sales)
 
 
 def product_group_stats_group_by(
@@ -229,6 +242,17 @@ def product_group_stats_group_by(
         if key not in stats:
             stats[key] = ProductGroupStats()
         stats[key].add_product(product)
+    return stats
+
+def product_group_stats_group_by_all_with_dupe(
+    group_key: Callable[[Product], List[str]], products: Iterable[Product]
+) -> dict[str, ProductGroupStats]:
+    stats: dict[str, ProductGroupStats] = {}
+    for product in products:
+        for key in group_key(product):
+            if key not in stats:
+                stats[key] = ProductGroupStats()
+            stats[key].add_product(product)
     return stats
 
 
@@ -252,14 +276,63 @@ def make_csv(
     return "\n".join(csv_lines)
 
 
-@inspect.command("category-sale-count")
+def get_compatible_with(product: Product) -> List[str]:
+    compatible_with = product.get_attribute('compatible-with')
+    return compatible_with or []
+
+@inspect.command("by-tag")
 @click.option(
     "--site",
     type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
     required=True,
     help="Envato site to analyze",
 )
-def _inspect_category_sale_count(site: str) -> None:
+@click.option(
+    "--published-after",
+    type=str,
+    required=False,
+    help="Formatted YYYY-MM-DDTHH:MM:SS+00:00, e.g. '2025-01-01T00:00:00+00:00'",
+)
+def _inspect_by_tag(site: str, published_after: Optional[str]) -> None:
+    """Show sales statistics per tag"""
+    # Group products by category
+    category_stats = product_group_stats_group_by_all_with_dupe(
+        get_compatible_with,
+        filter(lambda x: x.site == f"{site}.net" and (not published_after or x.published_at > published_after), cache.get_products().values()),
+    )
+    csv: str = make_csv(
+        category_stats.items(),
+        lambda item: (
+            {
+                "tag": item[0],
+                "product_count": item[1].product_count,
+                "total_sales": item[1].total_sales,
+                "average_sales": (
+                    item[1].total_sales / item[1].product_count
+                    if item[1].product_count > 0
+                    else 0
+                ),
+                "average_revenue": (
+                    item[1].total_revenue / item[1].product_count
+                    if item[1].product_count > 0
+                    else 0
+                ),
+                "min_revenue": item[1].min_revenue,
+                "min_sales": item[1].min_sales,
+            }
+        ),
+        sort_by="average_revenue",
+    )
+    click.echo(csv)
+
+@inspect.command("by-category")
+@click.option(
+    "--site",
+    type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
+    required=True,
+    help="Envato site to analyze",
+)
+def _inspect_by_category(site: str) -> None:
     """Show sales statistics per category"""
     # Group products by category
     category_stats = product_group_stats_group_by(
