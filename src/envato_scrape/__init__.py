@@ -1,16 +1,16 @@
-import atexit
 import json
 import os
 import sys
 import time
 import typing
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Iterable, List, Optional
 
 import click
 import requests
-from larch.pickle import pickle  # type: ignore[import-untyped]
+
+from . import cache
+from .product import Category, Product
 
 
 class SortBy(Enum):
@@ -24,237 +24,6 @@ class SortBy(Enum):
     NAME = "name"
     TRENDING = "trending"
     FEATURED_UNTIL = "featured_until"
-
-
-@dataclass
-class Rating:
-    rating: float
-    count: int
-
-    def serialize(self) -> dict:
-        return {"rating": self.rating, "count": self.count}
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Rating":
-        return cls(rating=data.get("rating", 0.0), count=data.get("count", 0))
-
-
-@dataclass
-class Length:
-    hours: int
-    minutes: int
-    seconds: int
-
-    def serialize(self) -> dict:
-        return {"hours": self.hours, "minutes": self.minutes, "seconds": self.seconds}
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Length":
-        return cls(
-            hours=data.get("hours", 0),
-            minutes=data.get("minutes", 0),
-            seconds=data.get("seconds", 0),
-        )
-
-
-@dataclass
-class Preview:
-    icon_url: str
-    mp3_url: str
-    mp3_preview_waveform_url: str
-    mp3_preview_download_url: str
-    mp3_id: int
-    length: Length
-
-    def serialize(self) -> dict:
-        return {
-            "icon_url": self.icon_url,
-            "mp3_url": self.mp3_url,
-            "mp3_preview_waveform_url": self.mp3_preview_waveform_url,
-            "mp3_preview_download_url": self.mp3_preview_download_url,
-            "mp3_id": self.mp3_id,
-            "length": self.length.serialize(),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Preview":
-        return cls(
-            icon_url=data.get("icon_url", ""),
-            mp3_url=data.get("mp3_url", ""),
-            mp3_preview_waveform_url=data.get("mp3_preview_waveform_url", ""),
-            mp3_preview_download_url=data.get("mp3_preview_download_url", ""),
-            mp3_id=data.get("mp3_id", 0),
-            length=Length.from_dict(data.get("length", {})),
-        )
-
-
-@dataclass
-class Product:
-    id: int
-    name: str
-    description: str
-    description_html: str
-    site: str
-    classification: str
-    classification_url: str
-    price_cents: int
-    number_of_sales: int
-    author_username: str
-    author_url: str
-    author_image: str
-    url: str
-    summary: str
-    rating: Rating
-    updated_at: str
-    published_at: str
-    trending: bool
-    previews: Preview
-    attributes: list[dict]
-    photo_attributes: list[dict]
-    key_features: list[str]
-    image_urls: list[str]
-    tags: list[str]
-    discounts: list[dict]
-
-    def serialize(self) -> dict:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "description_html": self.description_html,
-            "site": self.site,
-            "classification": self.classification,
-            "classification_url": self.classification_url,
-            "price_cents": self.price_cents,
-            "number_of_sales": self.number_of_sales,
-            "author_username": self.author_username,
-            "author_url": self.author_url,
-            "author_image": self.author_image,
-            "url": self.url,
-            "summary": self.summary,
-            "rating": self.rating.serialize(),
-            "updated_at": self.updated_at,
-            "published_at": self.published_at,
-            "trending": self.trending,
-            "previews": self.previews.serialize(),
-            "attributes": self.attributes,
-            "photo_attributes": self.photo_attributes,
-            "key_features": self.key_features,
-            "image_urls": self.image_urls,
-            "tags": self.tags,
-            "discounts": self.discounts,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Product":
-        return cls(
-            id=data.get("id", 0),
-            name=data.get("name", ""),
-            description=data.get("description", ""),
-            description_html=data.get("description_html", ""),
-            site=data.get("site", ""),
-            classification=data.get("classification", ""),
-            classification_url=data.get("classification_url", ""),
-            price_cents=data.get("price_cents", 0),
-            number_of_sales=data.get("number_of_sales", 0),
-            author_username=data.get("author_username", ""),
-            author_url=data.get("author_url", ""),
-            author_image=data.get("author_image", ""),
-            url=data.get("url", ""),
-            summary=data.get("summary", ""),
-            rating=Rating.from_dict(data.get("rating", {})),
-            updated_at=data.get("updated_at", ""),
-            published_at=data.get("published_at", ""),
-            trending=data.get("trending", False),
-            previews=Preview.from_dict(
-                data.get("previews", {}).get("icon_with_audio_preview", {})
-            ),
-            attributes=data.get("attributes", []),
-            photo_attributes=data.get("photo_attributes", []),
-            key_features=data.get("key_features", []),
-            image_urls=data.get("image_urls", []),
-            tags=data.get("tags", []),
-            discounts=data.get("discounts", []),
-        )
-
-
-class Category:
-    def __init__(self, name: str, path: str, total_products: Optional[int] = None):
-        self.name = name
-        self.path = path
-        self.total_products = total_products
-
-    def serialize(self) -> dict:
-        result: dict[str, Any] = {"name": self.name, "path": self.path}
-        if self.total_products is not None:
-            result["total_products"] = self.total_products
-        return result
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "Category":
-        return cls(
-            data["name"], data["path"], total_products=data.get("total_products")
-        )
-
-
-class Cache:
-    categories: dict[str, dict[str, Category]]
-    products: dict[int, Product]
-    cache_file: str
-
-    def __init__(self) -> None:
-        self.categories = {}
-        self.products = {}
-        self.cache_file = ".envato_scrape_cache.pickle"
-        self.load()
-        atexit.register(self.save)
-
-    def add_category(self, site: str, category: Category) -> None:
-        if site not in self.categories:
-            self.categories[site] = {}
-        self.categories[site][category.path] = category
-
-    def add_product(self, product: Product) -> None:
-        self.products[product.id] = product
-
-    def serialize(self) -> dict:
-        serialized: dict = {"categories": {}, "products": {}}
-        for site, categories in self.categories.items():
-            serialized["categories"][site] = {
-                name: category.serialize() for name, category in categories.items()
-            }
-        for product_id, product in self.products.items():
-            serialized["products"][str(product_id)] = product.serialize()
-        return serialized
-
-    def save(self) -> None:
-        try:
-            with open(self.cache_file, "wb") as f:
-                pickle.dump(self.serialize(), f)
-        except Exception as e:
-            click.echo(f"Failed to save cache: {e}", err=True)
-
-    def load(self) -> None:
-        try:
-            if os.path.exists(self.cache_file):
-                with open(self.cache_file, "rb") as f:
-                    data = pickle.load(f)
-                    # Load categories
-                    for site, categories in data.get("categories", {}).items():
-                        self.categories[site] = {}
-                        for name, category_data in categories.items():
-                            self.categories[site][name] = Category.from_dict(
-                                category_data
-                            )
-                    # Load products
-                    for product_id, product_data in data.get("products", {}).items():
-                        self.products[int(product_id)] = Product.from_dict(product_data)
-        except Exception as e:
-            click.echo(f"Failed to load cache: {e}", err=True)
-
-
-# Global cache instance
-cache = Cache()
 
 
 class EnvatoSite(Enum):
@@ -477,8 +246,9 @@ def make_csv(
     csv_lines = [",".join(headers)]
     # Create CSV rows
     for row in rows:
-        csv_lines.append(",".join(('"' + str(row[h]).replace('"', '""') + '"')
-                                  for h in headers))
+        csv_lines.append(
+            ",".join(('"' + str(row[h]).replace('"', '""') + '"') for h in headers)
+        )
     return "\n".join(csv_lines)
 
 
@@ -494,7 +264,7 @@ def _inspect_category_sale_count(site: str) -> None:
     # Group products by category
     category_stats = product_group_stats_group_by(
         lambda p: p.classification,
-        filter(lambda x: x.site == f"{site}.net", cache.products.values()),
+        filter(lambda x: x.site == f"{site}.net", cache.get_products().values()),
     )
     csv: str = make_csv(
         category_stats.items(),
@@ -513,10 +283,11 @@ def _inspect_category_sale_count(site: str) -> None:
                     if item[1].product_count > 0
                     else 0
                 ),
-                "total_products": cache.categories[site][item[0]].total_products or 0,
+                "total_products": cache.get_categories()[site][item[0]].total_products
+                or 0,
                 "sales_products_ratio": (
                     item[1].total_sales
-                    / (cache.categories[site][item[0]].total_products or 1)
+                    / (cache.get_categories()[site][item[0]].total_products or 1)
                 ),
             }
         ),
@@ -548,7 +319,7 @@ def _inspect_category_head(site: str, category: str, number: int) -> None:
     """Show top products in a category sorted by sales"""
     # Filter products by site and category
     filtered_products = []
-    for product in cache.products.values():
+    for product in cache.get_products().values():
         if product.site == f"{site}.net" and product.classification == category:
             filtered_products.append(product)
 
@@ -590,7 +361,7 @@ def _inspect_category_head(site: str, category: str, number: int) -> None:
 def fetch_category_sales(site: str) -> None:
     """Fetch total products for each category in the cache"""
     # Check if categories exist in cache
-    if site not in cache.categories or not cache.categories[site]:
+    if site not in cache.get_categories() or not cache.get_categories()[site]:
         click.echo(f"Error: No categories found in cache for site '{site}'", err=True)
         click.echo(
             "Please run 'envato-scrape categories list --site <site>' first "
@@ -602,7 +373,7 @@ def fetch_category_sales(site: str) -> None:
     api_key = check_api_key()
 
     # Process each category
-    for category in cache.categories[site].values():
+    for category in cache.get_categories()[site].values():
         click.echo(f"Fetching products for category: {category.path}")
 
         # Make API call to search endpoint to get total_hits
@@ -623,10 +394,6 @@ def fetch_category_sales(site: str) -> None:
             click.echo(f"  Total products: {total_products}")
         else:
             click.echo("  Could not find total products information", err=True)
-
-    # Save the updated cache
-    cache.save()
-    click.echo("Category products information updated in cache")
 
 
 @fetch.command("search-crawl")
@@ -689,7 +456,7 @@ def _crawl(
             sys.exit(1)
 
         # Get categories from cache
-        if site not in cache.categories:
+        if site not in cache.get_categories():
             click.echo(
                 f"Error: No categories found in cache for site '{site}'", err=True
             )
@@ -716,13 +483,13 @@ def _crawl(
 
     if all_categories:
         # Print category paths
-        print(list(cache.categories[site].values()))
-        categories_to_crawl = list(cache.categories[site].values())
-        category_paths = [cat.path for cat in cache.categories[site].values()]
+        print(list(cache.get_categories()[site].values()))
+        categories_to_crawl = list(cache.get_categories()[site].values())
+        category_paths = [cat.path for cat in cache.get_categories()[site].values()]
         click.echo(f"Found categories: {', '.join(category_paths)}")
     else:
         category_obj_list = [
-            cat for cat in cache.categories[site].values() if cat.path == category
+            cat for cat in cache.get_categories()[site].values() if cat.path == category
         ]
         if len(category_obj_list) == 0:
             click.echo(
