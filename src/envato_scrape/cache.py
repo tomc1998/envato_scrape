@@ -12,20 +12,24 @@ class Cache:
     categories: dict[str, dict[str, Category]]
     products: dict[int, Product]
     cache_file: str
+    dirty: bool
 
     def __init__(self) -> None:
         self.categories = {}
         self.products = {}
         self.cache_file = ".envato_scrape_cache.pickle"
+        self.dirty = False
         self.load()
         atexit.register(self.maybe_save)
 
     def add_category(self, site: str, category: Category) -> None:
+        self.dirty = True
         if site not in self.categories:
             self.categories[site] = {}
         self.categories[site][category.path] = category
 
     def add_product(self, product: Product) -> None:
+        self.dirty = True
         self.products[product.id] = product
 
     def serialize(self) -> dict:
@@ -39,7 +43,9 @@ class Cache:
         return serialized
 
     def maybe_save(self) -> None:
-        self.save()  ## TODO check if dirty
+        if self.dirty:
+            self.save()
+            self.dirty = False
 
     def save(self) -> None:
         try:
