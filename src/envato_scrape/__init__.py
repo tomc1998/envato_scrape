@@ -4,11 +4,12 @@ import os
 import sys
 import time
 import typing
-import click
-import requests
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional
+
+import click
+import requests
 from larch.pickle import pickle  # type: ignore[import-untyped]
 
 
@@ -184,7 +185,7 @@ class Category:
         self.total_products = total_products
 
     def serialize(self) -> dict:
-        result = {"name": self.name, "path": self.path}
+        result: dict[str, Any] = {"name": self.name, "path": self.path}
         if self.total_products is not None:
             result["total_products"] = self.total_products
         return result
@@ -192,9 +193,7 @@ class Category:
     @classmethod
     def from_dict(cls, data: dict) -> "Category":
         return cls(
-            data["name"], 
-            data["path"], 
-            total_products=data.get("total_products")
+            data["name"], data["path"], total_products=data.get("total_products")
         )
 
 
@@ -462,9 +461,9 @@ def _inspect_category_sale_count(site: str) -> None:
                 }
             category_stats[category]["product_count"] += 1
             category_stats[category]["total_sales"] += product.number_of_sales
-            category_stats[category]["total_revenue"] += float(product.number_of_sales) * (
-                float(product.price_cents) / 100.0
-            )
+            category_stats[category]["total_revenue"] += float(
+                product.number_of_sales
+            ) * (float(product.price_cents) / 100.0)
 
     # Calculate average sales per product and prepare for sorting
     results = []
@@ -485,7 +484,9 @@ def _inspect_category_sale_count(site: str) -> None:
                 "average_sales": average_sales,
                 "average_revenue": average_revenue,
                 "total_products": total_products,
-                "sales_products_ratio": (total_sales / total_products) if total_products > 0 else 0,
+                "sales_products_ratio": (
+                    (total_sales / total_products) if total_products > 0 else 0
+                ),
             }
         )
 
@@ -494,7 +495,10 @@ def _inspect_category_sale_count(site: str) -> None:
 
     # Output as CSV with headers
     # Use quotes to handle categories that may contain commas
-    click.echo("Category,Products,Total Sales,Average Sales,Average Revenue,Total Products,Sales/Products Ratio")
+    click.echo(
+        "Category,Products,Total Sales,Average Sales,"
+        + "Average Revenue,Total Products,Sales/Products Ratio"
+    )
     for result in results:
         # Escape quotes in category names by doubling them
         category = result["category"].replace('"', '""')
@@ -575,22 +579,20 @@ def fetch_category_sales(site: str) -> None:
     """Fetch total products for each category in the cache"""
     # Check if categories exist in cache
     if site not in cache.categories or not cache.categories[site]:
-        click.echo(
-            f"Error: No categories found in cache for site '{site}'", err=True
-        )
+        click.echo(f"Error: No categories found in cache for site '{site}'", err=True)
         click.echo(
             "Please run 'envato-scrape categories list --site <site>' first "
             + "to populate categories",
             err=True,
         )
         sys.exit(1)
-    
+
     api_key = check_api_key()
-    
+
     # Process each category
-    for category_path, category in cache.categories[site].items():
+    for category in cache.categories[site].values():
         click.echo(f"Fetching products for category: {category.path}")
-        
+
         # Make API call to search endpoint to get total_hits
         endpoint = "discovery/search/search/item"
         params = {
@@ -598,9 +600,9 @@ def fetch_category_sales(site: str) -> None:
             "category": category.path,
             "page": 1,
         }
-        
+
         data = make_envato_api_call(api_key, endpoint, params)
-        
+
         # Extract total_hits which represents total products
         total_products = data.get("total_hits")
         if total_products is not None:
@@ -608,8 +610,8 @@ def fetch_category_sales(site: str) -> None:
             category.total_products = total_products
             click.echo(f"  Total products: {total_products}")
         else:
-            click.echo(f"  Could not find total products information", err=True)
-    
+            click.echo("  Could not find total products information", err=True)
+
     # Save the updated cache
     cache.save()
     click.echo("Category products information updated in cache")
