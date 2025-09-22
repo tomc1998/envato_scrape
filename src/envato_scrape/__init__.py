@@ -6,7 +6,7 @@ import time
 import typing
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, Callable, Iterable, List, Optional
 
 import click
 import requests
@@ -451,6 +451,37 @@ class ProductGroupStats:
         self.total_revenue += (product.price_cents / 100.0) * product.number_of_sales
 
 
+def product_group_stats_group_by(
+    group_key: Callable[[Product], str], products: Iterable[Product]
+) -> dict[str, ProductGroupStats]:
+    stats: dict[str, ProductGroupStats] = {}
+    for product in products:
+        key = group_key(product)
+        if key not in stats:
+            stats[key] = ProductGroupStats()
+        stats[key].add_product(product)
+    return stats
+
+
+def make_csv(
+    data: Iterable[Any], row_callback: Callable[[Any], dict[str, Any]], *, sort_by: str
+) -> str:
+    """Convert a list of data to CSV format using a row callback to extract fields"""
+    rows: List[dict[str, Any]] = [row_callback(item) for item in data]
+    if not rows:
+        return ""
+    # Sort rows by the specified field in descending order
+    rows.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
+    # Create CSV header
+    headers = rows[0].keys()
+    csv_lines = [",".join(headers)]
+    # Create CSV rows
+    for row in rows:
+        csv_lines.append(",".join(('"' + str(row[h]).replace('"', '""') + '"')
+                                  for h in headers))
+    return "\n".join(csv_lines)
+
+
 @inspect.command("category-sale-count")
 @click.option(
     "--site",
@@ -461,64 +492,37 @@ class ProductGroupStats:
 def _inspect_category_sale_count(site: str) -> None:
     """Show sales statistics per category"""
     # Group products by category
-    category_stats: dict[str, ProductGroupStats] = {}
-
-    # Process each product in the cache
-    for product in cache.products.values():
-        # Check if the product belongs to the specified site
-        if product.site == f"{site}.net":
-            # Get the classification which should be the category
-            category = product.classification
-            if category not in category_stats:
-                category_stats[category] = ProductGroupStats()
-            category_stats[category].add_product(product)
-
-    # Calculate average sales per product and prepare for sorting
-    results = []
-    for category, stats in category_stats.items():
-        product_count = stats.product_count
-        total_sales = stats.total_sales
-        total_revenue = stats.total_revenue
-        total_products = cache.categories[site][category].total_products or 0
-        average_sales = total_sales / product_count if product_count > 0 else 0
-        average_revenue = (
-            float(total_revenue) / float(product_count) if product_count > 0 else 0
-        )
-        results.append(
+    category_stats = product_group_stats_group_by(
+        lambda p: p.classification,
+        filter(lambda x: x.site == f"{site}.net", cache.products.values()),
+    )
+    csv: str = make_csv(
+        category_stats.items(),
+        lambda item: (
             {
-                "category": category,
-                "product_count": product_count,
-                "total_sales": total_sales,
-                "average_sales": average_sales,
-                "average_revenue": average_revenue,
-                "total_products": total_products,
+                "category": item[0],
+                "product_count": item[1].product_count,
+                "total_sales": item[1].total_sales,
+                "average_sales": (
+                    item[1].total_sales / item[1].product_count
+                    if item[1].product_count > 0
+                    else 0
+                ),
+                "average_revenue": (
+                    item[1].total_revenue / item[1].product_count
+                    if item[1].product_count > 0
+                    else 0
+                ),
+                "total_products": cache.categories[site][item[0]].total_products or 0,
                 "sales_products_ratio": (
-                    (total_sales / total_products) if total_products > 0 else 0
+                    item[1].total_sales
+                    / (cache.categories[site][item[0]].total_products or 1)
                 ),
             }
-        )
-
-    # Sort by average sales in descending order
-    results.sort(key=lambda x: x["average_revenue"], reverse=True)
-
-    # Output as CSV with headers
-    # Use quotes to handle categories that may contain commas
-    click.echo(
-        "Category,Products,Total Sales,Average Sales,"
-        + "Average Revenue,Total Products,Sales/Products Ratio"
+        ),
+        sort_by="average_revenue",
     )
-    for result in results:
-        # Escape quotes in category names by doubling them
-        category = result["category"].replace('"', '""')
-        click.echo(
-            f'"{category}",'
-            f'{result["product_count"]},'
-            f'{result["total_sales"]},'
-            f'{result["average_sales"]:.2f},'
-            f'{result["average_revenue"]:.2f},'
-            f'{result["total_products"]},'
-            f'{result["sales_products_ratio"]:.2f}'
-        )
+    click.echo(csv)
 
 
 @inspect.command("category-head")
