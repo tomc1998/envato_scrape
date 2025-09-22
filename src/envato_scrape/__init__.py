@@ -435,6 +435,22 @@ def inspect() -> None:
     pass
 
 
+class ProductGroupStats:
+    product_count: int
+    total_sales: int
+    total_revenue: float
+
+    def __init__(self) -> None:
+        self.product_count = 0
+        self.total_sales = 0
+        self.total_revenue = 0.0
+
+    def add_product(self, product: Product) -> None:
+        self.product_count += 1
+        self.total_sales += product.number_of_sales
+        self.total_revenue += (product.price_cents / 100.0) * product.number_of_sales
+
+
 @inspect.command("category-sale-count")
 @click.option(
     "--site",
@@ -445,7 +461,7 @@ def inspect() -> None:
 def _inspect_category_sale_count(site: str) -> None:
     """Show sales statistics per category"""
     # Group products by category
-    category_stats: dict[str, dict] = {}
+    category_stats: dict[str, ProductGroupStats] = {}
 
     # Process each product in the cache
     for product in cache.products.values():
@@ -454,23 +470,15 @@ def _inspect_category_sale_count(site: str) -> None:
             # Get the classification which should be the category
             category = product.classification
             if category not in category_stats:
-                category_stats[category] = {
-                    "product_count": 0,
-                    "total_sales": 0,
-                    "total_revenue": 0,
-                }
-            category_stats[category]["product_count"] += 1
-            category_stats[category]["total_sales"] += product.number_of_sales
-            category_stats[category]["total_revenue"] += float(
-                product.number_of_sales
-            ) * (float(product.price_cents) / 100.0)
+                category_stats[category] = ProductGroupStats()
+            category_stats[category].add_product(product)
 
     # Calculate average sales per product and prepare for sorting
     results = []
     for category, stats in category_stats.items():
-        product_count = stats["product_count"]
-        total_sales = stats["total_sales"]
-        total_revenue = stats["total_revenue"]
+        product_count = stats.product_count
+        total_sales = stats.total_sales
+        total_revenue = stats.total_revenue
         total_products = cache.categories[site][category].total_products or 0
         average_sales = total_sales / product_count if product_count > 0 else 0
         average_revenue = (
