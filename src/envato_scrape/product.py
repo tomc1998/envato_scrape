@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -92,10 +93,22 @@ class Product:
     tags: list[str]
     discounts: list[dict]
 
+    def get_revenue_per_day(self) -> float:
+        days_published = (
+            time.time()
+            - time.mktime(time.strptime(self.published_at, "%Y-%m-%dT%H:%M:%S+00:00"))
+        ) / 86400
+        revenue_per_day = (
+            ((self.price_cents / 100.0) * self.number_of_sales / days_published)
+            if days_published > 0
+            else 0
+        )
+        return revenue_per_day
+
     def get_attribute(self, name: str) -> Optional[Any]:
         for attrib in self.attributes:
-            if attrib['name'] == name:
-                return attrib['value']
+            if attrib["name"] == name:
+                return attrib["value"]
         return None
 
     def serialize(self) -> dict:

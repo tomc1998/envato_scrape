@@ -4,7 +4,7 @@ import sys
 import time
 import typing
 from enum import Enum
-from typing import Any, Callable, Iterable, List, Optional, cast
+from typing import Any, Callable, Iterable, List, Optional
 
 import click
 import requests
@@ -212,6 +212,7 @@ class ProductGroupStats:
     min_revenue: float
     max_sales: int
     max_revenue: float
+    total_revenue_per_day: float
 
     def __init__(self) -> None:
         self.product_count = 0
@@ -221,16 +222,35 @@ class ProductGroupStats:
         self.min_revenue = 0.0
         self.max_sales = 0
         self.max_revenue = 0.0
+        self.total_revenue_per_day = 0.0
 
+    def get_average_revenue_per_day(self) -> float:
+        if self.product_count == 0:
+            return 0.0
+        return self.total_revenue_per_day / self.product_count
 
     def add_product(self, product: Product) -> None:
         self.product_count += 1
         self.total_sales += product.number_of_sales
         self.total_revenue += (product.price_cents / 100.0) * product.number_of_sales
-        self.min_sales = min(self.min_sales, product.number_of_sales) if self.product_count > 1 else product.number_of_sales
-        self.min_revenue = min(self.min_revenue, (product.price_cents / 100.0) * product.number_of_sales) if self.product_count > 1 else (product.price_cents / 100.0) * product.number_of_sales
+        self.min_sales = (
+            min(self.min_sales, product.number_of_sales)
+            if self.product_count > 1
+            else product.number_of_sales
+        )
+        self.min_revenue = (
+            min(
+                self.min_revenue,
+                (product.price_cents / 100.0) * product.number_of_sales,
+            )
+            if self.product_count > 1
+            else (product.price_cents / 100.0) * product.number_of_sales
+        )
         self.max_sales = max(self.max_sales, product.number_of_sales)
-        self.max_revenue = max(self.max_revenue, (product.price_cents / 100.0) * product.number_of_sales)
+        self.max_revenue = max(
+            self.max_revenue, (product.price_cents / 100.0) * product.number_of_sales
+        )
+        self.total_revenue_per_day += product.get_revenue_per_day()
 
 
 def product_group_stats_group_by(
@@ -243,6 +263,7 @@ def product_group_stats_group_by(
             stats[key] = ProductGroupStats()
         stats[key].add_product(product)
     return stats
+
 
 def product_group_stats_group_by_all_with_dupe(
     group_key: Callable[[Product], List[str]], products: Iterable[Product]
@@ -277,10 +298,16 @@ def make_csv(
 
 
 def get_compatible_with(product: Product) -> List[str]:
-    compatible_with = product.get_attribute('compatible-with')
+    compatible_with = product.get_attribute("compatible-with")
     return compatible_with or []
 
-@inspect.command("by-tag")
+
+def get_compatible_software(product: Product) -> List[str]:
+    compatible_software = product.get_attribute("compatible-software")
+    return compatible_software or []
+
+
+@inspect.command("by-compatible-plugins")
 @click.option(
     "--site",
     type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
@@ -293,18 +320,22 @@ def get_compatible_with(product: Product) -> List[str]:
     required=False,
     help="Formatted YYYY-MM-DDTHH:MM:SS+00:00, e.g. '2025-01-01T00:00:00+00:00'",
 )
-def _inspect_by_tag(site: str, published_after: Optional[str]) -> None:
-    """Show sales statistics per tag"""
+def _inspect_by_compatible_plugins(site: str, published_after: Optional[str]) -> None:
+    """Show sales statistics per compatible plugins"""
     # Group products by category
     category_stats = product_group_stats_group_by_all_with_dupe(
         get_compatible_with,
-        filter(lambda x: x.site == f"{site}.net" and (not published_after or x.published_at > published_after), cache.get_products().values()),
+        filter(
+            lambda x: x.site == f"{site}.net"
+            and (not published_after or x.published_at > published_after),
+            cache.get_products().values(),
+        ),
     )
     csv: str = make_csv(
         category_stats.items(),
         lambda item: (
             {
-                "tag": item[0],
+                "plugin": item[0],
                 "product_count": item[1].product_count,
                 "total_sales": item[1].total_sales,
                 "average_sales": (
@@ -317,6 +348,7 @@ def _inspect_by_tag(site: str, published_after: Optional[str]) -> None:
                     if item[1].product_count > 0
                     else 0
                 ),
+                "average_revenue_per_day": item[1].get_average_revenue_per_day(),
                 "min_revenue": item[1].min_revenue,
                 "min_sales": item[1].min_sales,
             }
@@ -325,19 +357,129 @@ def _inspect_by_tag(site: str, published_after: Optional[str]) -> None:
     )
     click.echo(csv)
 
-@inspect.command("by-category")
+
+@inspect.command("wordpress-business-recent")
+@click.option(
+    "--published-after",
+    type=str,
+    required=False,
+    help="Formatted YYYY-MM-DDTHH:MM:SS+00:00, e.g. '2025-01-01T00:00:00+00:00'",
+)
+def _inspect_wordpress_business_recent(published_after: Optional[str]) -> None:
+    """Show sales statistics per compatible software (e.g. wordpress version)"""
+    products: List[Product] = []
+    for product in cache.get_products().values():
+        category = product.classification
+        if (
+            "Elementor" in get_compatible_with(product)
+            and category == "wordpress/corporate/business"
+            and (not published_after or product.published_at > published_after)
+        ):
+            products.append(product)
+    sorted_products = sorted(
+        products, key=lambda x: x.get_revenue_per_day(), reverse=True
+    )
+
+    for product in sorted_products:
+        ## Compute the number of days this product has been published
+        revenue_per_day = product.get_revenue_per_day()
+        click.echo(
+            f"{product.name},{product.url},{product.number_of_sales},,,{product.author_username},{product.author_url},{revenue_per_day:2f}"
+        )
+
+
+@inspect.command("by-compatible-software")
 @click.option(
     "--site",
     type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
     required=True,
     help="Envato site to analyze",
 )
-def _inspect_by_category(site: str) -> None:
+@click.option(
+    "--published-after",
+    type=str,
+    required=False,
+    help="Formatted YYYY-MM-DDTHH:MM:SS+00:00, e.g. '2025-01-01T00:00:00+00:00'",
+)
+def _inspect_by_compatible_software(site: str, published_after: Optional[str]) -> None:
+    """Show sales statistics per compatible software (e.g. wordpress version)"""
+    # Group products by category
+    category_stats = product_group_stats_group_by_all_with_dupe(
+        get_compatible_software,
+        filter(
+            lambda x: x.site == f"{site}.net"
+            and (not published_after or x.published_at > published_after),
+            cache.get_products().values(),
+        ),
+    )
+    csv: str = make_csv(
+        category_stats.items(),
+        lambda item: (
+            {
+                "software": item[0],
+                "product_count": item[1].product_count,
+                "total_sales": item[1].total_sales,
+                "average_sales": (
+                    item[1].total_sales / item[1].product_count
+                    if item[1].product_count > 0
+                    else 0
+                ),
+                "average_revenue": (
+                    item[1].total_revenue / item[1].product_count
+                    if item[1].product_count > 0
+                    else 0
+                ),
+                "average_revenue_per_day": item[1].get_average_revenue_per_day(),
+                "min_revenue": item[1].min_revenue,
+                "min_sales": item[1].min_sales,
+            }
+        ),
+        sort_by="average_revenue",
+    )
+    click.echo(csv)
+
+
+@inspect.command("elementor-core-only")
+@click.option(
+    "--published-after",
+    type=str,
+    required=False,
+    help="Formatted YYYY-MM-DDTHH:MM:SS+00:00, e.g. '2025-01-01T00:00:00+00:00'",
+)
+def _inspect_elementor_core_only(published_after: Optional[str]) -> None:
+    """Show sales statistics per tag"""
+    # Find products compatible with 'Elementor' only, and not 'Elementor Pro'
+    for product in cache.get_products().values():
+        compatible = get_compatible_with(product)
+        if "Elementor" in compatible and "Elementor Pro" not in compatible:
+            if not published_after or product.published_at > published_after:
+                click.echo(
+                    f"{product.url}, {product.name}, {product.number_of_sales}, "
+                    + f"{product.price_cents / 100.0}, "
+                    + f"{(product.price_cents / 100.0) * product.number_of_sales}, "
+                    + f"{product.author_username}"
+                )
+
+
+@inspect.command("by-category")
+@click.option(
+    "--published-after",
+    type=str,
+    required=False,
+    help="Formatted YYYY-MM-DDTHH:MM:SS+00:00, e.g. '2025-01-01T00:00:00+00:00'",
+)
+@click.option(
+    "--site",
+    type=click.Choice([site.value for site in EnvatoSite], case_sensitive=False),
+    required=True,
+    help="Envato site to analyze",
+)
+def _inspect_by_category(site: str, published_after: Optional[str]) -> None:
     """Show sales statistics per category"""
     # Group products by category
     category_stats = product_group_stats_group_by(
         lambda p: p.classification,
-        filter(lambda x: x.site == f"{site}.net", cache.get_products().values()),
+        filter(lambda x: x.site == f"{site}.net" and (not published_after or x.published_at > published_after), cache.get_products().values()),
     )
     csv: str = make_csv(
         category_stats.items(),
@@ -358,6 +500,7 @@ def _inspect_by_category(site: str) -> None:
                 ),
                 "total_products": cache.get_categories()[site][item[0]].total_products
                 or 0,
+                "average_revenue_per_day": item[1].get_average_revenue_per_day(),
                 "sales_products_ratio": (
                     item[1].total_sales
                     / (cache.get_categories()[site][item[0]].total_products or 1)
